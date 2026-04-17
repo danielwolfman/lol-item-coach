@@ -125,6 +125,7 @@ function startGameStatePolling() {
 
 async function boot() {
   registerStartup();
+  process.env.LOL_ITEM_COACH_CACHE_DIR = path.join(app.getPath("userData"), ".cache");
   localServer = await startServer(APP_PORT);
   createWindow();
   startGameStatePolling();

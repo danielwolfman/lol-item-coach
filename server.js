@@ -7,10 +7,6 @@ const { URL } = require("node:url");
 const PORT = Number(process.env.PORT || 3210);
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
-const CACHE_DIR = path.join(ROOT, ".cache");
-const PATCH_FILE = path.join(CACHE_DIR, "patch-version.json");
-const ITEMS_FILE = path.join(CACHE_DIR, "item-data.json");
-const CHAMPIONS_FILE = path.join(CACHE_DIR, "champion-data.json");
 const META_BUILD_TTL_MS = 1000 * 60 * 60 * 6;
 const REPLACEMENT_SCORE_THRESHOLD = 8;
 const PARTY_CACHE_TTL_MS = 1000 * 15;
@@ -30,6 +26,24 @@ const cache = {
   staticData: null,
   partySnapshot: null
 };
+
+function getCacheDir() {
+  return process.env.LOL_ITEM_COACH_CACHE_DIR
+    ? path.resolve(process.env.LOL_ITEM_COACH_CACHE_DIR)
+    : path.join(ROOT, ".cache");
+}
+
+function getPatchFile() {
+  return path.join(getCacheDir(), "patch-version.json");
+}
+
+function getItemsFile() {
+  return path.join(getCacheDir(), "item-data.json");
+}
+
+function getChampionsFile() {
+  return path.join(getCacheDir(), "champion-data.json");
+}
 
 const DAMAGE_ARCHETYPE_HINTS = {
   marksman: { physical: 0.96, magic: 0.04 },
@@ -363,7 +377,7 @@ function httpGetText(targetUrl, { headers = undefined, insecure = false, timeout
 }
 
 function getMetaBuildCacheFile(slug) {
-  return path.join(CACHE_DIR, `mobalytics-build-${slug}.json`);
+  return path.join(getCacheDir(), `mobalytics-build-${slug}.json`);
 }
 
 function readFreshMetaBuild(slug) {
@@ -397,7 +411,7 @@ async function loadMobalyticsBuild(player, staticData) {
     return cached;
   }
 
-  ensureDir(CACHE_DIR);
+  ensureDir(getCacheDir());
   const url = `https://mobalytics.gg/lol/champions/${slug}/build`;
   const html = await httpGetText(url, { timeoutMs: 9000 });
   const coreIds = extractSectionItemIds(html, "Core Items", { maxChars: 4000, limit: 6 });
@@ -428,11 +442,14 @@ async function loadStaticData() {
     return cache.staticData;
   }
 
-  ensureDir(CACHE_DIR);
+  ensureDir(getCacheDir());
 
-  const cachedVersion = readJsonIfPresent(PATCH_FILE);
-  const cachedItems = readJsonIfPresent(ITEMS_FILE);
-  const cachedChampions = readJsonIfPresent(CHAMPIONS_FILE);
+  const patchFile = getPatchFile();
+  const itemsFile = getItemsFile();
+  const championsFile = getChampionsFile();
+  const cachedVersion = readJsonIfPresent(patchFile);
+  const cachedItems = readJsonIfPresent(itemsFile);
+  const cachedChampions = readJsonIfPresent(championsFile);
 
   let version = cachedVersion?.version || null;
   let itemsPayload = cachedItems;
@@ -443,7 +460,7 @@ async function loadStaticData() {
       timeoutMs: 8000
     });
     version = versions[0];
-    writeJson(PATCH_FILE, { version });
+    writeJson(patchFile, { version });
   } catch (error) {
     if (!version) {
       throw new Error(`Unable to load Riot patch version: ${error.message}`);
@@ -458,7 +475,7 @@ async function loadStaticData() {
         timeoutMs: 12000
       }).then((payload) => {
         itemsPayload = payload;
-        writeJson(ITEMS_FILE, payload);
+        writeJson(itemsFile, payload);
       })
     );
   }
@@ -469,7 +486,7 @@ async function loadStaticData() {
         timeoutMs: 12000
       }).then((payload) => {
         championsPayload = payload;
-        writeJson(CHAMPIONS_FILE, payload);
+        writeJson(championsFile, payload);
       })
     );
   }
