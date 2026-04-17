@@ -1,0 +1,53 @@
+{
+  "name": "lol-next-item-assistant",
+  "version": "0.2.0",
+  "description": "Electron desktop assistant that recommends the next League of Legends item during a live game.",
+  "author": "Codex",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node server.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win msi"
+  },
+  "build": {
+    "appId": "com.codex.lolnextitemassistant",
+    "productName": "LoL Next Item Assistant",
+    "asar": true,
+    "icon": "build/icon.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "build/icon.ico",
+      "public/**/*",
+      "README.md",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "msi",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "msi": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "warningsAsErrors": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^38.3.0",
+    "electron-builder": "^26.0.12"
+  }
+}

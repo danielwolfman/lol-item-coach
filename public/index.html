@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LoL Next Item Sidecar</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">League of Legends Item PoC</p>
+          <h1>Next-buy sidecar</h1>
+          <p class="subtitle">
+            Scores item options from live game data, enemy threat, and a class-based meta prior.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-btn" class="primary-btn">Refresh now</button>
+          <button id="mock-btn" class="secondary-btn">Load mock match</button>
+        </div>
+      </section>
+
+      <section id="status-card" class="panel status-card">
+        <div>
+          <p class="panel-label">Status</p>
+          <h2 id="status-text">Connecting to League Live Client API...</h2>
+        </div>
+        <p id="status-detail" class="muted">Waiting for first response.</p>
+      </section>
+
+      <section id="summary-grid" class="summary-grid hidden">
+        <article class="panel summary-panel">
+          <p class="panel-label">You</p>
+          <h2 id="player-heading">-</h2>
+          <p id="player-stats" class="muted">-</p>
+          <div id="player-items" class="item-strip"></div>
+        </article>
+
+        <article class="panel summary-panel">
+          <p class="panel-label">Enemy Damage Mix</p>
+          <div class="mix-bars">
+            <div class="mix-row">
+              <span>AD</span>
+              <div class="meter"><div id="ad-bar" class="fill ad-fill"></div></div>
+              <strong id="ad-share">0%</strong>
+            </div>
+            <div class="mix-row">
+              <span>AP</span>
+              <div class="meter"><div id="ap-bar" class="fill ap-fill"></div></div>
+              <strong id="ap-share">0%</strong>
+            </div>
+          </div>
+          <p id="enemy-extra" class="muted">-</p>
+        </article>
+
+        <article class="panel summary-panel">
+          <p class="panel-label">Top Threat</p>
+          <h2 id="threat-heading">-</h2>
+          <p id="threat-stats" class="muted">-</p>
+          <p id="threat-damage" class="muted">-</p>
+        </article>
+      </section>
+
+      <section id="recommendations-section" class="hidden">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Recommendations</p>
+            <h2>Best next items right now</h2>
+          </div>
+          <p id="meta-line" class="muted"></p>
+        </div>
+        <div id="recommendation-grid" class="recommendation-grid"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
