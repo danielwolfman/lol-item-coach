@@ -952,6 +952,7 @@ function normalizePlayer(rawPlayer, champions) {
   return {
     name: rawPlayer.summonerName || rawPlayer.riotIdGameName || "Unknown Player",
     team: rawPlayer.team || "ORDER",
+    position: rawPlayer.position || rawPlayer.assignedPosition || "",
     champion,
     championName,
     archetype: deriveArchetype(champion),
@@ -970,6 +971,41 @@ function normalizePlayer(rawPlayer, champions) {
       ap: getStat(championStats, ["abilityPower", "magicDamage"])
     }
   };
+}
+
+function isSupportIncomeItem(item) {
+  if (!item) {
+    return false;
+  }
+  const lower = item.features?.lowerText || "";
+  return (
+    lower.includes("world atlas") ||
+    lower.includes("runic compass") ||
+    lower.includes("bounty of worlds") ||
+    lower.includes("bloodsong") ||
+    lower.includes("solstice sleigh") ||
+    lower.includes("dream maker") ||
+    lower.includes("celestial opposition") ||
+    lower.includes("zaz'zak")
+  );
+}
+
+function hasSupportProfile(self, itemMap) {
+  if (self.position === "UTILITY") {
+    return true;
+  }
+  return self.items.some((itemId) => isSupportIncomeItem(itemMap[itemId]));
+}
+
+function countCompletedBuildItems(self, itemMap) {
+  return getBuildSlotItemIds(self.items, itemMap).filter((itemId) => isCompletedInventoryItem(itemMap[itemId])).length;
+}
+
+function countCompletedCoreItems(self, itemMap) {
+  return getBuildSlotItemIds(self.items, itemMap).filter((itemId) => {
+    const item = itemMap[itemId];
+    return item && isCompletedInventoryItem(item) && !item.features.isBoots && !isSupportIncomeItem(item);
+  }).length;
 }
 
 function computeDamageProfile(player, itemMap) {
@@ -1224,6 +1260,7 @@ function computePhaseBonus(item, context) {
   const feature = item.features;
   const phase = context.phase;
   const archetype = context.self.archetype;
+  const isSupportProfile = context.isSupportProfile;
   let bonus = 0;
 
   if (phase === "lane") {
@@ -1247,6 +1284,23 @@ function computePhaseBonus(item, context) {
     } else if (archetype === "tank") {
       if (stats.health >= 300 || stats.armor >= 35 || stats.mr >= 35) {
         bonus += 5;
+      }
+      if (isSupportProfile) {
+        if (lower.includes("trailblazer")) {
+          bonus += 8;
+        }
+        if (lower.includes("locket") || lower.includes("bandlepipes")) {
+          bonus += 6;
+        }
+        if (feature.hasAbilityHaste) {
+          bonus += 2;
+        }
+        if (feature.lowerText.includes("trail") || feature.lowerText.includes("allied champion")) {
+          bonus += 3.5;
+        }
+        if (lower.includes("thornmail")) {
+          bonus -= 8;
+        }
       }
     } else if (archetype === "enchanter") {
       if (stats.mana >= 300 || feature.hasAbilityHaste || feature.hasHealShieldPower) {
@@ -1296,6 +1350,8 @@ function scoreItem(item, context) {
   const needs = context.needs;
   const topThreat = enemyField.topThreat;
   const liveWeight = context.liveSignal;
+  const isSupportProfile = context.isSupportProfile;
+  const lowerName = item.name.toLowerCase();
 
   let base = 0;
   base += (stats.ad / 40) * weights.ad * 10;
@@ -1388,6 +1444,20 @@ function scoreItem(item, context) {
   }
   if (context.self.archetype === "tank" && stats.ad + stats.ap >= 80 && stats.armor + stats.mr + stats.health < 250) {
     penalties -= 8;
+  }
+  if (isSupportProfile) {
+    if (lowerName.includes("thornmail") && (enemyField.healingPressure < 0.45 || context.phase === "lane")) {
+      penalties -= 7;
+    }
+    if (lowerName.includes("trailblazer")) {
+      progressionBonus += 3.5;
+      if (context.phase === "lane" || context.phase === "mid") {
+        progressionBonus += 2.5;
+      }
+    }
+    if (lowerName.includes("locket") || lowerName.includes("bandlepipes")) {
+      progressionBonus += 2.5;
+    }
   }
   if (
     (context.self.archetype === "mage" ||
@@ -1611,6 +1681,8 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
   const fullBuild = hasFullCompletedBuild(player, staticData.items);
   const prefersMagic =
     player.archetype === "mage" || player.archetype === "ap-assassin" || player.archetype === "enchanter";
+  const supportProfile = hasSupportProfile(player, staticData.items);
+  const completedCoreItems = countCompletedCoreItems(player, staticData.items);
   let externalBuild = null;
   let providerError = null;
 
@@ -1626,8 +1698,13 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
   const situationalPoolIds = unique(externalBuild?.situationalIds || []).filter(
     (itemId) => staticData.items[itemId] && !staticData.items[itemId].features.isBoots
   );
-  const preferredPoolIds =
-    shared.liveSignal >= 0.35
+  const supportMergedPoolIds =
+    supportProfile && completedCoreItems < 2
+      ? unique([...baselinePoolIds, ...situationalPoolIds])
+      : null;
+  const preferredPoolIds = supportMergedPoolIds?.length
+    ? supportMergedPoolIds
+    : shared.liveSignal >= 0.35
       ? situationalPoolIds.length
         ? situationalPoolIds
         : baselinePoolIds
@@ -1646,6 +1723,7 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
     phase,
     liveSignal: shared.liveSignal,
     hasBoots,
+    isSupportProfile: supportProfile,
     prefersMagic,
     version: staticData.version
   };
@@ -1684,10 +1762,12 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
     },
     meta: {
       modelSummary: shared.liveSignal >= 0.35
-        ? "Mobalytics situational-item pool + live enemy threat + live damage mix + current board state."
+        ? supportMergedPoolIds?.length
+          ? "Mobalytics support core + situational pool + live enemy threat + live damage mix + current board state."
+          : "Mobalytics situational-item pool + live enemy threat + live damage mix + current board state."
         : "Mobalytics core/full build pool + current level and build state.",
       source: buildMetaSource(player),
-      pool: shared.liveSignal >= 0.35 ? "situational" : "baseline",
+      pool: supportMergedPoolIds?.length ? "support-blend" : shared.liveSignal >= 0.35 ? "situational" : "baseline",
       providerStatus: externalBuild ? "ok" : "fallback",
       providerError,
       teammateLabel
