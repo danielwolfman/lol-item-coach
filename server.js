@@ -792,6 +792,7 @@ async function loadPremadePartyMembers() {
   let me = null;
   let currentSummoner = null;
   let lobbyMembers = [];
+  let friends = [];
 
   try {
     [me, currentSummoner] = await Promise.all([
@@ -808,9 +809,22 @@ async function loadPremadePartyMembers() {
     }
 
     const selfPuuid = currentSummoner?.puuid || me?.puuid;
-    const teammatePuuids = memberPuuids.filter((puuid) => puuid && puuid !== selfPuuid);
+    let teammatePuuids = memberPuuids.filter((puuid) => puuid && puuid !== selfPuuid);
+
+    if (!teammatePuuids.length && me?.lol?.gameId) {
+      friends = await lcuGetJson("/lol-chat/v1/friends").catch(() => []);
+      teammatePuuids = unique(
+        friends
+          .filter((friend) => String(friend?.lol?.gameId || "") === String(me.lol.gameId))
+          .map((friend) => friend.puuid)
+          .filter((puuid) => puuid && puuid !== selfPuuid)
+      );
+    }
 
     if (!teammatePuuids.length) {
+      if (cached?.members?.length) {
+        return cached.members;
+      }
       cache.partySnapshot = { fetchedAt: Date.now(), members: [] };
       return [];
     }
@@ -819,9 +833,11 @@ async function loadPremadePartyMembers() {
       await Promise.all(
         teammatePuuids.map(async (puuid) => {
           const fallbackLobbyMember = lobbyMembers.find((member) => member.puuid === puuid) || {};
+          const fallbackFriend = friends.find((friend) => friend.puuid === puuid) || {};
           const summoner = await lcuGetJson(`/lol-summoner/v2/summoners/puuid/${puuid}`).catch(() => null);
           const merged = {
             ...fallbackLobbyMember,
+            ...fallbackFriend,
             ...(summoner || {})
           };
           const nameCandidates = buildPartyNameCandidates(merged);
