@@ -1,4 +1,4 @@
-﻿# LoL Item Coach
+# LoL Item Coach
 
 ![LoL Item Coach icon](build/icon.png)
 
@@ -63,4 +63,3 @@ Build an MSI on Windows with:
 ```powershell
 npm.cmd run dist
 ```
-
