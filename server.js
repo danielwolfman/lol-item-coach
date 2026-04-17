@@ -1025,33 +1025,91 @@ function countCompletedCoreItems(self, itemMap) {
   }).length;
 }
 
-function computeDamageProfile(player, itemMap) {
-  const baseHint = DAMAGE_ARCHETYPE_HINTS[player.archetype] || DAMAGE_ARCHETYPE_HINTS.fighter;
-  let physical = baseHint.physical;
-  let magic = baseHint.magic;
-
-  let adSum = 0;
-  let apSum = 0;
-  let critSum = 0;
+function sumOffenseStats(player, itemMap) {
+  let ad = 0;
+  let ap = 0;
+  let crit = 0;
+  let attackSpeed = 0;
 
   for (const itemId of player.items) {
     const item = itemMap[itemId];
     if (!item) {
       continue;
     }
-    adSum += item.stats.ad;
-    apSum += item.stats.ap;
-    critSum += item.stats.crit;
+    ad += item.stats.ad;
+    ap += item.stats.ap;
+    crit += item.stats.crit;
+    attackSpeed += item.stats.attackSpeed;
   }
 
-  physical += adSum / 180 + critSum / 150;
-  magic += apSum / 180;
+  return { ad, ap, crit, attackSpeed };
+}
+
+function computeDamageProfile(player, itemMap) {
+  const baseHint = DAMAGE_ARCHETYPE_HINTS[player.archetype] || DAMAGE_ARCHETYPE_HINTS.fighter;
+  const offense = sumOffenseStats(player, itemMap);
+  const completedItems = player.items.filter((itemId) => Number(itemMap[itemId]?.gold?.total || 0) >= 2200).length;
+  const offensiveSignal = clamp(
+    (offense.ad + offense.ap + offense.crit * 1.7 + offense.attackSpeed * 1.15 + completedItems * 22) / 260,
+    0,
+    1.35
+  );
+  const baseWeight = clamp(0.52 - offensiveSignal * 0.2, 0.16, 0.52);
+
+  let physical = 0.5 + (baseHint.physical - 0.5) * baseWeight;
+  let magic = 0.5 + (baseHint.magic - 0.5) * baseWeight;
+
+  physical += offense.ad / 155 + offense.crit / 110 + offense.attackSpeed / 240;
+  magic += offense.ap / 155;
+
+  if (player.archetype === "tank" && offense.ap < 45 && offense.ad < 45) {
+    physical += 0.12;
+    magic -= 0.12;
+  }
+  if (player.archetype === "enchanter" && offense.ap < 70) {
+    physical += 0.06;
+    magic -= 0.06;
+  }
 
   const total = Math.max(0.01, physical + magic);
   return {
     physical: physical / total,
     magic: magic / total
   };
+}
+
+function computeDamageInfluence(player, itemMap) {
+  const offense = sumOffenseStats(player, itemMap);
+  const completedItems = player.items.filter((itemId) => Number(itemMap[itemId]?.gold?.total || 0) >= 2200).length;
+  const scoreLead = Math.max(0, player.kills - player.deaths);
+  const archetypeBase =
+    player.archetype === "tank" || player.archetype === "enchanter"
+      ? 0.78
+      : player.archetype === "marksman" || player.archetype === "mage" || player.archetype === "ap-assassin"
+        ? 1.05
+        : 0.92;
+
+  return clamp(
+    archetypeBase +
+      offense.ad / 260 +
+      offense.ap / 320 +
+      offense.crit / 130 +
+      offense.attackSpeed / 300 +
+      completedItems * 0.08 +
+      scoreLead * 0.035,
+    0.6,
+    1.85
+  );
+}
+
+function isAutoAttackThreat(player, itemMap) {
+  const offense = sumOffenseStats(player, itemMap);
+  return (
+    player.archetype === "marksman" ||
+    offense.crit >= 20 ||
+    offense.attackSpeed >= 22 ||
+    offense.ad >= 85
+  );
 }
 
 function computeThreatScore(player, itemMap) {
@@ -1068,6 +1126,7 @@ function summariseEnemyField(enemies, itemMap) {
   const assessed = enemies.map((player) => {
     const damage = computeDamageProfile(player, itemMap);
     const threatScore = computeThreatScore(player, itemMap);
+    const damageInfluence = computeDamageInfluence(player, itemMap);
     const healingSignals = player.items.reduce((sum, itemId) => {
       const item = itemMap[itemId];
       if (!item) {
@@ -1083,18 +1142,32 @@ function summariseEnemyField(enemies, itemMap) {
       ...player,
       threatScore,
       damage,
+      damageInfluence,
       healingSignals
     };
   });
 
   const totalThreat = assessed.reduce((sum, player) => sum + player.threatScore, 0) || 1;
-  const physicalShare =
-    assessed.reduce((sum, player) => sum + player.threatScore * player.damage.physical, 0) / totalThreat;
-  const magicShare =
-    assessed.reduce((sum, player) => sum + player.threatScore * player.damage.magic, 0) / totalThreat;
+  const totalPressure = assessed.reduce((sum, player) => sum + player.threatScore * player.damageInfluence, 0) || 1;
   const healingPressure =
     assessed.reduce((sum, player) => sum + player.healingSignals * (player.threatScore / totalThreat), 0);
-  const topThreat = assessed.slice().sort((left, right) => right.threatScore - left.threatScore)[0];
+  const ranked = assessed.slice().sort((left, right) => right.threatScore - left.threatScore);
+  const topThreat = ranked[0];
+  const runnerUpThreat = ranked[1] || null;
+  const topThreatShare = topThreat ? topThreat.threatScore / totalThreat : 0;
+  const topThreatLead = topThreat && runnerUpThreat ? clamp((topThreat.threatScore - runnerUpThreat.threatScore) / totalThreat, 0, 1) : 0;
+  let physicalShare =
+    assessed.reduce((sum, player) => sum + player.threatScore * player.damageInfluence * player.damage.physical, 0) /
+    totalPressure;
+  let magicShare =
+    assessed.reduce((sum, player) => sum + player.threatScore * player.damageInfluence * player.damage.magic, 0) /
+    totalPressure;
+
+  if (topThreat) {
+    const dominantBias = clamp(topThreatShare * 0.9 + topThreatLead * 0.7 - 0.12, 0, 0.42);
+    physicalShare = clamp(physicalShare * (1 - dominantBias) + topThreat.damage.physical * dominantBias, 0.02, 0.98);
+    magicShare = clamp(1 - physicalShare, 0.02, 0.98);
+  }
 
   return {
     players: assessed,
@@ -1102,7 +1175,9 @@ function summariseEnemyField(enemies, itemMap) {
     physicalShare,
     magicShare,
     healingPressure,
-    topThreat
+    topThreat,
+    topThreatShare,
+    topThreatLead
   };
 }
 
@@ -1415,12 +1490,14 @@ function scoreItem(item, context) {
     liveWeight;
 
   let topThreatBonus = 0;
+  const topThreatShare = enemyField.topThreatShare || (topThreat ? topThreat.threatScore / Math.max(1, enemyField.totalThreat) : 0);
+  const topThreatLead = enemyField.topThreatLead || 0;
+  const topThreatIsPhysical = topThreat ? topThreat.damage.physical >= topThreat.damage.magic : false;
   if (topThreat && liveWeight >= 0.35) {
-    const threatIsPhysical = topThreat.damage.physical >= topThreat.damage.magic;
-    if (threatIsPhysical) {
-      topThreatBonus += adCounterValue * (topThreat.threatScore / enemyField.totalThreat) * 0.9 * liveWeight;
+    if (topThreatIsPhysical) {
+      topThreatBonus += adCounterValue * topThreatShare * (0.95 + topThreatLead * 1.3) * liveWeight;
     } else {
-      topThreatBonus += apCounterValue * (topThreat.threatScore / enemyField.totalThreat) * 0.9 * liveWeight;
+      topThreatBonus += apCounterValue * topThreatShare * (0.95 + topThreatLead * 1.3) * liveWeight;
     }
   }
 
@@ -1474,6 +1551,22 @@ function scoreItem(item, context) {
     }
     if (lowerName.includes("locket") || lowerName.includes("bandlepipes")) {
       progressionBonus += 2.5;
+    }
+  }
+  if (
+    lowerName.includes("thornmail") &&
+    topThreat &&
+    topThreatIsPhysical &&
+    liveWeight >= 0.35 &&
+    (enemyField.healingPressure >= 0.55 || isAutoAttackThreat(topThreat, context.itemMap))
+  ) {
+    progressionBonus += ownedIds.has("3076") ? 6.5 : 0;
+    topThreatBonus += (5.5 + topThreatShare * 14 + topThreatLead * 10) * liveWeight;
+    if (isAutoAttackThreat(topThreat, context.itemMap)) {
+      topThreatBonus += 4.5 * liveWeight;
+    }
+    if (enemyField.healingPressure >= 0.75) {
+      topThreatBonus += 3.5 * liveWeight;
     }
   }
   if (
@@ -1719,12 +1812,11 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
     supportProfile && completedCoreItems < 2
       ? unique([...baselinePoolIds, ...situationalPoolIds])
       : null;
+  const carryoverPoolIds = baselinePoolIds.filter((itemId) => countOwnedComponents(staticData.items[itemId], ownedIds) > 0);
   const preferredPoolIds = supportMergedPoolIds?.length
     ? supportMergedPoolIds
     : shared.liveSignal >= 0.35
-      ? situationalPoolIds.length
-        ? situationalPoolIds
-        : baselinePoolIds
+      ? unique([...(situationalPoolIds.length ? situationalPoolIds : baselinePoolIds), ...carryoverPoolIds])
       : baselinePoolIds.length
         ? baselinePoolIds
         : situationalPoolIds;
@@ -1734,6 +1826,7 @@ async function buildPerspectiveForPlayer(player, staticData, shared, options = {
   const scoringContext = {
     self: player,
     ownedIds,
+    itemMap: staticData.items,
     enemyField: shared.enemyField,
     needs,
     gameMinutes: shared.gameMinutes,
