@@ -32,7 +32,7 @@ jobs:
             $shortSha = "${{ github.sha }}".Substring(0, 7)
             "tag_name=main-build-${{ github.run_number }}" >> $env:GITHUB_OUTPUT
             "release_name=Main Build #${{ github.run_number }} ($shortSha)" >> $env:GITHUB_OUTPUT
-            "prerelease=true" >> $env:GITHUB_OUTPUT
+            "prerelease=false" >> $env:GITHUB_OUTPUT
           }
 
       - name: Install dependencies
